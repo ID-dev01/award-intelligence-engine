@@ -1,0 +1,12 @@
+name: Hourly Price Watcher
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows you to run it manually
+
+jobs:
+  ping-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Alert API
+        run: curl -X GET https://award-intelligence-engine-m8l3.vercel.app/api/check-alerts
