@@ -1,7 +1,12 @@
+// src/lib/engine.ts
+
 export interface Card {
+  id?: any;       // Add this line to fix the "id does not exist" error
   name: string;
   points: number;
 }
+
+// ... rest of your engine.ts code (AwardOption, TransferResult, etc.)
 
 export interface AwardOption {
   airline: string;
