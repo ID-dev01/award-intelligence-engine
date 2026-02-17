@@ -1,16 +1,8 @@
 "use client";
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Plus, 
-  Trash2, 
-  TrendingUp, 
-  ShieldCheck, 
-  Plane,
-  RefreshCcw,
-  Wallet,
-  Coins,
-  Zap,
-  ArrowUpRight
+  Plus, Trash2, TrendingUp, ShieldCheck, Plane, 
+  RefreshCcw, Wallet, Coins, Zap, ArrowUpRight 
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { AwardEngine, Card, AwardOption } from '../lib/engine';
@@ -29,72 +21,64 @@ export default function Dashboard() {
   // --- INITIALIZE ALL DATA ---
   useEffect(() => {
     async function initDashboard() {
-      setLoading(true);
-      
-      // 1. Fetch Route Settings
-      const { data: settings } = await supabase
-        .from('app_settings')
-        .select('*')
-        .single();
-      if (settings) {
-        setOrigin(settings.origin_code);
-        setDestination(settings.destination_code);
-      }
+      try {
+        setLoading(true);
+        
+        // 1. Fetch Route Settings
+        const { data: settings } = await supabase.from('app_settings').select('*').eq('id', 1).single();
+        if (settings) {
+          setOrigin(settings.origin_code);
+          setDestination(settings.destination_code);
+        }
 
-      // 2. Fetch Portfolio
-      const { data: pointsData } = await supabase
-        .from('user_points')
-        .select('*')
-        .order('created_at', { ascending: true });
-      if (pointsData) {
-        setPortfolio(pointsData.map(p => ({ 
-          id: p.id, 
-          name: p.card_name, 
-          points: p.points_balance 
-        })));
-      }
+        // 2. Fetch Portfolio
+        const { data: pointsData } = await supabase.from('user_points').select('*').order('created_at', { ascending: true });
+        if (pointsData) {
+          setPortfolio(pointsData.map(p => ({ id: p.id, name: p.card_name, points: p.points_balance })));
+        }
 
-      // 3. Fetch History
-      const { data: flightData } = await supabase
-        .from('award_snapshots')
-        .select('*')
-        .order('captured_at', { ascending: true })
-        .limit(15);
-
-      if (flightData && flightData.length > 0) {
-        setHistory(flightData);
-        const latest = flightData[flightData.length - 1];
-        setTargetAward({
-          airline: latest.airline,
-          program: latest.program as any,
-          miles_required: latest.miles_required,
-          tax_usd: Number(latest.tax_usd),
-          cash_equivalent_usd: 4200
-        });
+        // 3. Fetch History
+        const { data: flightData } = await supabase.from('award_snapshots').select('*').order('captured_at', { ascending: true }).limit(15);
+        if (flightData && flightData.length > 0) {
+          setHistory(flightData);
+          const latest = flightData[flightData.length - 1];
+          setTargetAward({
+            airline: latest.airline,
+            program: latest.program as any,
+            miles_required: latest.miles_required,
+            tax_usd: Number(latest.tax_usd),
+            cash_equivalent_usd: 4200
+          });
+        }
+      } catch (e) {
+        console.error("Initialization failed:", e);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     initDashboard();
   }, []);
 
-  // --- UPDATE ROUTE IN SUPABASE ---
+  // --- PERSISTENT ROUTE UPDATE ---
   const updateRoute = async (type: 'origin' | 'dest', val: string) => {
     const upperVal = val.toUpperCase().slice(0, 3);
+    
+    // UI Update
     if (type === 'origin') setOrigin(upperVal);
     else setDestination(upperVal);
 
-    await supabase
-      .from('app_settings')
-      .update({ [type === 'origin' ? 'origin_code' : 'destination_code']: upperVal })
-      .eq('id', 1);
+    // Database Update (Upsert ensures it exists)
+    if (upperVal.length === 3) {
+      await supabase.from('app_settings').upsert({ 
+        id: 1, 
+        [type === 'origin' ? 'origin_code' : 'destination_code']: upperVal 
+      });
+    }
   };
 
-  // --- UPDATE CARD POINTS ---
   const updateCardPoints = async (id: any, newVal: string) => {
     const numericVal = parseInt(newVal) || 0;
-    setPortfolio(prev => prev.map(card => 
-      card.id === id ? { ...card, points: numericVal } : card
-    ));
+    setPortfolio(prev => prev.map(card => card.id === id ? { ...card, points: numericVal } : card));
     await supabase.from('user_points').update({ points_balance: numericVal }).eq('id', id);
   };
 
@@ -114,17 +98,9 @@ export default function Dashboard() {
     if (!error) setPortfolio(portfolio.filter((_, i) => i !== index));
   };
 
-  // --- CALCULATIONS ---
-  const totalPoints = useMemo(() => 
-    portfolio.reduce((sum, card) => sum + card.points, 0), 
-    [portfolio]
-  );
-
+  const totalPoints = useMemo(() => portfolio.reduce((sum, card) => sum + card.points, 0), [portfolio]);
   const engine = useMemo(() => new AwardEngine(), []);
-  const strategy = useMemo(() => 
-    targetAward ? engine.optimize(portfolio, targetAward) : null, 
-    [portfolio, targetAward, engine]
-  );
+  const strategy = useMemo(() => targetAward ? engine.optimize(portfolio, targetAward) : null, [portfolio, targetAward, engine]);
 
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -145,22 +121,24 @@ export default function Dashboard() {
             <h1 className="text-4xl font-black tracking-tight flex items-center gap-3">
               Route: 
               <input 
-                value={origin} 
-                onChange={(e) => updateRoute('origin', e.target.value)}
-                className="bg-slate-900 border border-slate-800 w-24 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
+                key={`origin-${origin}`}
+                defaultValue={origin} 
+                onBlur={(e) => updateRoute('origin', e.target.value)}
+                className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
               />
               <span className="text-slate-700">⇄</span>
               <input 
-                value={destination} 
-                onChange={(e) => updateRoute('dest', e.target.value)}
-                className="bg-slate-900 border border-slate-800 w-24 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
+                key={`dest-${destination}`}
+                defaultValue={destination} 
+                onBlur={(e) => updateRoute('dest', e.target.value)}
+                className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
               />
             </h1>
           </div>
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
             <Plane className="text-blue-400" size={24} />
             <div>
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Target Program</p>
+              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Active Target</p>
               <p className="font-bold text-lg">{targetAward?.airline} ({targetAward?.program})</p>
             </div>
           </div>
@@ -168,8 +146,6 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
-            
-            {/* PORTFOLIO SECTION */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 shadow-2xl">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-bold flex items-center gap-2"><Wallet className="text-blue-500" /> Points Portfolio</h2>
@@ -177,13 +153,11 @@ export default function Dashboard() {
                   {totalPoints.toLocaleString()} TOTAL PTS
                 </div>
               </div>
-              
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 pb-8 border-b border-slate-800">
                 <input type="text" placeholder="Card Name" value={newCardName} onChange={(e) => setNewCardName(e.target.value)} className="bg-slate-950 border border-slate-700 p-4 rounded-xl text-white outline-none focus:ring-1 focus:ring-blue-500" />
                 <input type="number" placeholder="Balance" value={newCardPoints} onChange={(e) => setNewCardPoints(e.target.value)} className="bg-slate-950 border border-slate-700 p-4 rounded-xl text-white outline-none focus:ring-1 focus:ring-blue-500" />
                 <button onClick={addCard} className="bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all">Add Account</button>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {portfolio.map((card, idx) => (
                   <div key={card.id || idx} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-center justify-between group hover:border-blue-500/50 transition-colors">
@@ -196,8 +170,6 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
-
-            {/* STRATEGY DISPLAY */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-inner">
               <h2 className="text-xl font-bold flex items-center gap-2 mb-8"><TrendingUp className="text-blue-500" /> Optimal Booking Strategy</h2>
               <div className="grid gap-4">
@@ -217,40 +189,16 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-
-          {/* SIDEBAR */}
           <div className="space-y-6">
             <TrendChart data={history} />
-            
             <div className="p-8 bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl text-white shadow-xl shadow-blue-900/40">
-              <div className="flex items-center gap-2 mb-4">
-                <Zap size={20} className="text-yellow-300 fill-yellow-300" />
-                <h3 className="font-black text-sm uppercase tracking-widest">Efficiency Maximizer</h3>
-              </div>
-              
+              <div className="flex items-center gap-2 mb-4"><Zap size={20} className="text-yellow-300 fill-yellow-300" /><h3 className="font-black text-sm uppercase tracking-widest">Efficiency Maximizer</h3></div>
               <div className="space-y-4">
-                <div>
-                  <p className="text-xs opacity-70 font-bold uppercase">Estimated Cash Savings</p>
-                  <p className="text-4xl font-black tracking-tighter">
-                    ${targetAward ? (targetAward.cash_equivalent_usd - targetAward.tax_usd).toLocaleString() : '0'}
-                  </p>
-                </div>
-                
-                <div className="pt-4 border-t border-white/10">
-                  <p className="text-xs opacity-70 font-bold uppercase mb-2">Portfolio Coverage</p>
-                  <div className="h-2 w-full bg-black/20 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-yellow-300 transition-all duration-1000" 
-                      style={{ width: `${Math.min((totalPoints / (targetAward?.miles_required || 1)) * 100, 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
+                <div><p className="text-xs opacity-70 font-bold uppercase">Estimated Cash Savings</p><p className="text-4xl font-black tracking-tighter">${targetAward ? (targetAward.cash_equivalent_usd - targetAward.tax_usd).toLocaleString() : '0'}</p></div>
+                <div className="pt-4 border-t border-white/10"><p className="text-xs opacity-70 font-bold uppercase mb-2">Portfolio Coverage</p><div className="h-2 w-full bg-black/20 rounded-full overflow-hidden"><div className="h-full bg-yellow-300 transition-all duration-1000" style={{ width: `${Math.min((totalPoints / (targetAward?.miles_required || 1)) * 100, 100)}%` }}></div></div></div>
               </div>
             </div>
-
-            <button className="w-full py-5 bg-white text-blue-600 font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-50 transition-all shadow-lg group">
-              EXECUTE BOOKING <ArrowUpRight className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-            </button>
+            <button className="w-full py-5 bg-white text-blue-600 font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-50 transition-all shadow-lg group">EXECUTE BOOKING <ArrowUpRight size={20} /></button>
           </div>
         </div>
       </div>
