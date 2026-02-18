@@ -2,7 +2,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, Trash2, TrendingUp, ShieldCheck, Plane, 
-  RefreshCcw, Wallet, Coins, Zap, ArrowUpRight 
+  RefreshCcw, Wallet, Coins, Zap, ArrowUpRight, Calendar, Filter,
+  X, CheckCircle2 // Add these
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { AwardEngine, Card, AwardOption } from '../lib/engine';
@@ -12,6 +13,11 @@ export default function Dashboard() {
   const [portfolio, setPortfolio] = useState<Card[]>([]);
   const [origin, setOrigin] = useState('BOM');
   const [destination, setDestination] = useState('JFK');
+  const [month, setMonth] = useState('May');
+  const [tripType, setTripType] = useState('Round Trip');
+  const [cabin, setCabin] = useState('Business');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
   const [newCardName, setNewCardName] = useState('');
   const [newCardPoints, setNewCardPoints] = useState('');
   const [history, setHistory] = useState<any[]>([]);
@@ -23,21 +29,20 @@ export default function Dashboard() {
     async function initDashboard() {
       try {
         setLoading(true);
-        
-        // 1. Fetch Route Settings
         const { data: settings } = await supabase.from('app_settings').select('*').eq('id', 1).single();
         if (settings) {
           setOrigin(settings.origin_code);
           setDestination(settings.destination_code);
+          setMonth(settings.month_to_fly || 'May');
+          setTripType(settings.trip_type || 'Round Trip');
+          setCabin(settings.cabin_class || 'Business');
         }
 
-        // 2. Fetch Portfolio
         const { data: pointsData } = await supabase.from('user_points').select('*').order('created_at', { ascending: true });
         if (pointsData) {
           setPortfolio(pointsData.map(p => ({ id: p.id, name: p.card_name, points: p.points_balance })));
         }
 
-        // 3. Fetch History
         const { data: flightData } = await supabase.from('award_snapshots').select('*').order('captured_at', { ascending: true }).limit(15);
         if (flightData && flightData.length > 0) {
           setHistory(flightData);
@@ -59,21 +64,19 @@ export default function Dashboard() {
     initDashboard();
   }, []);
 
-  // --- PERSISTENT ROUTE UPDATE ---
-  const updateRoute = async (type: 'origin' | 'dest', val: string) => {
-    const upperVal = val.toUpperCase().slice(0, 3);
-    
-    // UI Update
-    if (type === 'origin') setOrigin(upperVal);
-    else setDestination(upperVal);
+  // --- PERSISTENT SETTINGS UPDATE ---
+  const updateSetting = async (field: string, val: string) => {
+    // 1. Update UI immediately
+    if (field === 'origin_code') setOrigin(val.toUpperCase());
+    if (field === 'destination_code') setDestination(val.toUpperCase());
+    if (field === 'month_to_fly') setMonth(val);
+    if (field === 'trip_type') setTripType(val);
+    if (field === 'cabin_class') setCabin(val);
 
-    // Database Update (Upsert ensures it exists)
-    if (upperVal.length === 3) {
-      await supabase.from('app_settings').upsert({ 
-        id: 1, 
-        [type === 'origin' ? 'origin_code' : 'destination_code']: upperVal 
-      });
-    }
+    // 2. Persist to DB
+    await supabase.from('app_settings').upsert({ id: 1, [field]: val });
+    
+    // 3. Optional: Trigger a fresh API search here for the "Exact Deal"
   };
 
   const updateCardPoints = async (id: any, newVal: string) => {
@@ -112,96 +115,165 @@ export default function Dashboard() {
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        {/* HEADER: EDITABLE ROUTE */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase mb-1">
-              <ShieldCheck size={16} /> Award Intelligence Engine
-            </div>
-            <h1 className="text-4xl font-black tracking-tight flex items-center gap-3">
-              Route: 
-              <input 
-                key={`origin-${origin}`}
-                defaultValue={origin} 
-                onBlur={(e) => updateRoute('origin', e.target.value)}
-                className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
-              />
-              <span className="text-slate-700">⇄</span>
-              <input 
-                key={`dest-${destination}`}
-                defaultValue={destination} 
-                onBlur={(e) => updateRoute('dest', e.target.value)}
-                className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
-              />
-            </h1>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
-            <Plane className="text-blue-400" size={24} />
+        {/* HEADER: EDITABLE ROUTE & FILTERS */}
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Active Target</p>
-              <p className="font-bold text-lg">{targetAward?.airline} ({targetAward?.program})</p>
+              <div className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase mb-1">
+                <ShieldCheck size={16} /> Award Intelligence Engine
+              </div>
+              <h1 className="text-4xl font-black tracking-tight flex flex-wrap items-center gap-3">
+                Route: 
+                <input 
+                  key={`origin-${origin}`}
+                  defaultValue={origin} 
+                  onBlur={(e) => updateSetting('origin_code', e.target.value)}
+                  className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
+                />
+                <span className="text-slate-700">⇄</span>
+                <input 
+                  key={`dest-${destination}`}
+                  defaultValue={destination} 
+                  onBlur={(e) => updateSetting('destination_code', e.target.value)}
+                  className="bg-slate-900 border border-slate-800 w-28 px-2 py-1 rounded-lg text-blue-500 underline underline-offset-8 outline-none focus:ring-1 focus:ring-blue-500 text-center"
+                />
+              </h1>
+            </div>
+
+            {/* FILTER BAR */}
+            <div className="flex flex-wrap gap-3 bg-slate-900/50 p-2 rounded-2xl border border-slate-800">
+              <div className="flex items-center gap-2 px-3 py-2 bg-slate-950 rounded-xl border border-slate-800">
+                <Calendar size={14} className="text-slate-500" />
+                <select 
+                  value={month} 
+                  onChange={(e) => updateSetting('month_to_fly', e.target.value)}
+                  className="bg-transparent text-sm font-bold outline-none cursor-pointer"
+                >
+                  {['May', 'June', 'July', 'August', 'September'].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 px-3 py-2 bg-slate-950 rounded-xl border border-slate-800">
+                <Filter size={14} className="text-slate-500" />
+                <select 
+                  value={tripType} 
+                  onChange={(e) => updateSetting('trip_type', e.target.value)}
+                  className="bg-transparent text-sm font-bold outline-none cursor-pointer"
+                >
+                  <option value="Round Trip">Round Trip</option>
+                  <option value="One Way">One Way</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 rounded-xl border border-blue-500/20 text-blue-400">
+                <Zap size={14} />
+                <select 
+                  value={cabin} 
+                  onChange={(e) => updateSetting('cabin_class', e.target.value)}
+                  className="bg-transparent text-sm font-black outline-none cursor-pointer uppercase"
+                >
+                  <option value="Business">Business</option>
+                  <option value="First">First</option>
+                  <option value="Economy">Economy</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-8">
-            <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 shadow-2xl">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold flex items-center gap-2"><Wallet className="text-blue-500" /> Points Portfolio</h2>
-                <div className="text-sm font-black text-blue-400 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">
-                  {totalPoints.toLocaleString()} TOTAL PTS
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 pb-8 border-b border-slate-800">
-                <input type="text" placeholder="Card Name" value={newCardName} onChange={(e) => setNewCardName(e.target.value)} className="bg-slate-950 border border-slate-700 p-4 rounded-xl text-white outline-none focus:ring-1 focus:ring-blue-500" />
-                <input type="number" placeholder="Balance" value={newCardPoints} onChange={(e) => setNewCardPoints(e.target.value)} className="bg-slate-950 border border-slate-700 p-4 rounded-xl text-white outline-none focus:ring-1 focus:ring-blue-500" />
-                <button onClick={addCard} className="bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all">Add Account</button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {portfolio.map((card, idx) => (
-                  <div key={card.id || idx} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-center justify-between group hover:border-blue-500/50 transition-colors">
-                    <div className="flex-1 mr-4">
-                      <p className="text-[10px] text-slate-500 font-black uppercase mb-1">{card.name}</p>
-                      <input type="number" value={card.points} onChange={(e) => updateCardPoints(card.id, e.target.value)} className="bg-transparent text-xl font-bold text-white w-full outline-none focus:text-blue-400" />
-                    </div>
-                    <button onClick={() => removeCard(card.id, idx)} className="text-slate-700 hover:text-red-500 transition-colors"><Trash2 size={20} /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-inner">
-              <h2 className="text-xl font-bold flex items-center gap-2 mb-8"><TrendingUp className="text-blue-500" /> Optimal Booking Strategy</h2>
-              <div className="grid gap-4">
-                {strategy?.transfers.length === 0 ? (
-                  <div className="p-10 border border-dashed border-slate-800 rounded-2xl text-center text-slate-500">
-                    <Coins className="mx-auto mb-2 opacity-20" size={32} />
-                    Update your balances above to calculate the transfer path.
-                  </div>
-                ) : (
-                  strategy?.transfers.map((t, idx) => (
-                    <div key={idx} className="bg-slate-950 border border-slate-800 p-5 rounded-2xl flex items-center justify-between border-l-4 border-l-blue-500">
-                      <div><p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Transfer From</p><p className="font-bold text-lg">{t.from}</p></div>
-                      <div className="text-right"><p className="text-xs text-blue-500 font-bold uppercase mb-1">Required Points</p><p className="text-2xl font-black">{t.amount.toLocaleString()}</p></div>
-                    </div>
-                  ))
-                )}
-              </div>
+        {/* ... (Keep the rest of your Portfolio and Strategy grid code here) ... */}
+        {/* Ensure the "Execute Booking" section displays the details: */}
+        {/* example: {month} Round Trip in {cabin} */}
+      </div>
+      {/* BOOKING BLUEPRINT MODAL */}
+{isModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+    <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden">
+      {/* Modal Header */}
+      <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+        <div>
+          <h2 className="text-2xl font-black flex items-center gap-2">
+            <CheckCircle2 className="text-green-500" /> Booking Blueprint
+          </h2>
+          <p className="text-slate-500 text-sm font-medium">Follow these steps to lock in your {cabin} deal.</p>
+        </div>
+        <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
+          <X size={24} />
+        </button>
+      </div>
+
+      {/* Modal Content */}
+      <div className="p-8 space-y-8">
+        {/* Deal Summary Card */}
+        <div className="bg-blue-600 p-6 rounded-2xl text-white flex justify-between items-center">
+          <div>
+            <p className="text-xs font-black uppercase opacity-80 tracking-widest">Confirmed Deal</p>
+            <p className="text-2xl font-bold">{origin} → {destination}</p>
+            <p className="text-sm opacity-90">{month} | {tripType} | {cabin}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-3xl font-black">{targetAward?.miles_required.toLocaleString()}</p>
+            <p className="text-xs font-bold uppercase opacity-80">Total Points + ${targetAward?.tax_usd} Tax</p>
+          </div>
+        </div>
+
+        {/* Step-by-Step Checklist */}
+        <div className="space-y-6">
+          <div className="flex gap-4">
+            <div className="flex-none w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center font-black text-blue-400">1</div>
+            <div>
+              <p className="font-bold text-slate-100 uppercase text-sm tracking-wide">Initiate Transfer</p>
+              <p className="text-slate-400 text-sm">
+                Log into your {strategy?.transfers[0]?.from || 'Bank'} portal. Transfer 
+                <span className="text-white font-bold"> {strategy?.transfers[0]?.amount.toLocaleString()} points</span> to 
+                <span className="text-blue-400 font-bold"> {targetAward?.program}</span>. 
+                (Usually instant, may take up to 24hrs).
+              </p>
             </div>
           </div>
-          <div className="space-y-6">
-            <TrendChart data={history} />
-            <div className="p-8 bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl text-white shadow-xl shadow-blue-900/40">
-              <div className="flex items-center gap-2 mb-4"><Zap size={20} className="text-yellow-300 fill-yellow-300" /><h3 className="font-black text-sm uppercase tracking-widest">Efficiency Maximizer</h3></div>
-              <div className="space-y-4">
-                <div><p className="text-xs opacity-70 font-bold uppercase">Estimated Cash Savings</p><p className="text-4xl font-black tracking-tighter">${targetAward ? (targetAward.cash_equivalent_usd - targetAward.tax_usd).toLocaleString() : '0'}</p></div>
-                <div className="pt-4 border-t border-white/10"><p className="text-xs opacity-70 font-bold uppercase mb-2">Portfolio Coverage</p><div className="h-2 w-full bg-black/20 rounded-full overflow-hidden"><div className="h-full bg-yellow-300 transition-all duration-1000" style={{ width: `${Math.min((totalPoints / (targetAward?.miles_required || 1)) * 100, 100)}%` }}></div></div></div>
-              </div>
+
+          <div className="flex gap-4">
+            <div className="flex-none w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center font-black text-blue-400">2</div>
+            <div>
+              <p className="font-bold text-slate-100 uppercase text-sm tracking-wide">Search on {targetAward?.program}</p>
+              <p className="text-slate-400 text-sm">
+                Visit the official <span className="text-white underline underline-offset-4">{targetAward?.program} website</span>. 
+                Search for {origin} to {destination} in {month} selecting <strong>"Book with Points"</strong> and <strong>"{cabin}"</strong>.
+              </p>
             </div>
-            <button className="w-full py-5 bg-white text-blue-600 font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-50 transition-all shadow-lg group">EXECUTE BOOKING <ArrowUpRight size={20} /></button>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-none w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center font-black text-blue-400">3</div>
+            <div>
+              <p className="font-bold text-slate-100 uppercase text-sm tracking-wide">Confirm & Pay Tax</p>
+              <p className="text-slate-400 text-sm">
+                Select the {targetAward?.airline} flight. Use your credit card to pay the remaining 
+                <span className="text-white font-bold"> ${targetAward?.tax_usd}</span> in taxes and fees.
+              </p>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Footer */}
+      <div className="p-6 bg-slate-950/50 border-t border-slate-800">
+        <button 
+          onClick={() => window.open(`https://www.google.com/search?q=${targetAward?.program}+award+search`, '_blank')}
+          className="w-full py-4 bg-white text-black font-black rounded-xl hover:bg-blue-50 transition-all uppercase tracking-widest"
+        >
+          Take Me to {targetAward?.program}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+<button 
+  onClick={() => setIsModalOpen(true)}
+  className="w-full py-5 bg-white text-blue-600 font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-50 transition-all shadow-lg group"
+>
+  EXECUTE BOOKING <ArrowUpRight className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+</button>
     </main>
   );
 }
